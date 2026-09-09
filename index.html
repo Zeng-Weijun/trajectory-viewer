@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Trajectory Viewer</title>
+<meta name="description" content="Two views over the same agent-trajectory corpus: a two-lane dialogue reader and a linear event stream.">
+<meta name="theme-color" content="#101216">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="trajectory-dialogue.css">
+<style>
+  body { display: grid; place-items: center; min-height: 100vh; padding: 40px 22px; }
+  .landing { max-width: 620px; width: 100%; }
+  .landing h1 {
+    font-family: var(--f-display); font-weight: 500; letter-spacing: -.02em;
+    font-size: clamp(28px, 5vw, 40px); margin: 0 0 10px;
+  }
+  .landing > p { color: var(--ink-3); margin: 0 0 30px; font-size: 15px; }
+  .landing a.card {
+    display: block; text-decoration: none; color: inherit; margin-bottom: 12px;
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 6px; background: var(--surface); padding: 16px 18px;
+  }
+  .landing a.card:hover { border-color: var(--line-2); border-left-color: var(--accent); background: var(--surface-2); }
+  .landing a.card strong { display: block; font-size: 17px; font-weight: 500; margin-bottom: 5px; }
+  .landing a.card span { color: var(--ink-3); font-size: 13.5px; line-height: 1.6; }
+  .landing footer {
+    margin-top: 26px; font-family: var(--f-mono); font-size: 11px;
+    color: var(--ink-4); line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+<main class="landing">
+  <h1>Agent Trajectory Viewer</h1>
+  <p>同一份轨迹语料的两种读法。45 条轨迹 · 22,076 个事件。</p>
+
+  <a class="card" href="trajectory-dialogue.html">
+    <strong>双栏对话视图 →</strong>
+    <span>左栏是喂给模型的（系统提示、注入上下文、真人指令、工具结果），右栏是模型产出的（推理、回复、工具调用）。
+      并行调用同块对齐，失败可筛可跳，带运行来源、AI 助手与标注侧栏。</span>
+  </a>
+
+  <a class="card" href="trajectory-explorer.html">
+    <strong>线性事件流 →</strong>
+    <span>按时间顺序铺开的完整消息流，保留原始事件粒度。</span>
+  </a>
+
+  <footer>
+    静态站点，无构建、无依赖。<br>
+    数据源自 EmpiriaAI/EmpiriaAI.github.io。
+  </footer>
+</main>
+</body>
+</html>

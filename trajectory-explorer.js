@@ -8,8 +8,13 @@
 
   var selectedIndex = 0;
   var activeCategory = (function () {
+    var order = ['feedback', 'swe', 'terminal'];
     var wanted = new URLSearchParams(location.search).get('category');
-    return ['feedback', 'swe', 'terminal'].indexOf(wanted) >= 0 ? wanted : 'feedback';
+    if (order.indexOf(wanted) >= 0) return wanted;
+    var present = order.filter(function (category) {
+      return trajectories.some(function (t) { return t.trajectoryClass === category; });
+    });
+    return present[0] || 'feedback';
   })();
   var highQualityOnly = false;
   var deduplicateSessions = false;
@@ -259,6 +264,8 @@
   function renderCategoryNav() {
     Array.prototype.forEach.call(elements.topCategoryNav.querySelectorAll('[data-category]'), function (button) {
       button.setAttribute('aria-pressed', String(button.dataset.category === activeCategory));
+      /* a corpus that is not in this build should not offer a tab that leads nowhere */
+      button.hidden = !categoryItems(button.dataset.category).length;
     });
   }
 

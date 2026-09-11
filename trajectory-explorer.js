@@ -273,7 +273,9 @@
     var snapshotSessions = new Set(snapshotItems.map(function (trajectory) { return trajectory.conversationId; })).size;
     text('deduplicateHint', deduplicateSessions ? snapshotSessions + ' longest snapshots · ' + (snapshotItems.length - snapshotSessions) + ' hidden' : snapshotItems.length + ' snapshots → ' + snapshotSessions + ' longest');
 
-    ['feedback', 'swe', 'terminal'].forEach(function (category) {
+    ['feedback', 'swe', 'terminal'].slice().sort(function (a, b) {
+      return (a === activeCategory ? -1 : 0) - (b === activeCategory ? -1 : 0);
+    }).forEach(function (category) {
       if (!categoryItems(category).length) return;
       var section = document.createElement('section');
       section.className = 'sidebar-group';

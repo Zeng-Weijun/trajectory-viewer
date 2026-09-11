@@ -34,7 +34,7 @@
 <body>
 <main class="landing">
   <h1>Agent Trajectory Viewer</h1>
-  <p>同一份轨迹语料的两种读法。45 条轨迹 · 22,076 个事件。</p>
+  <p>两份语料，两种读法。反馈轨迹 45 条 · 22,076 个事件；SWE 环境 rollout 83 条 · 47 个任务 · 3,178 个事件。</p>
 
   <a class="card" href="trajectory-dialogue.html">
     <strong>双栏对话视图 →</strong>
@@ -44,12 +44,19 @@
 
   <a class="card" href="trajectory-explorer.html">
     <strong>线性事件流 →</strong>
-    <span>按时间顺序铺开的完整消息流，保留原始事件粒度。</span>
+    <span>按时间顺序铺开的完整消息流，保留原始事件粒度。顶栏切换语料。</span>
+  </a>
+
+  <a class="card" href="trajectory-explorer.html?category=swe">
+    <strong>SWE 环境 rollout →</strong>
+    <span>swe-task-forge minions v148：47 个任务、83 次 codex:glm-5.3-flash rollout。
+      推理、shell 调用与 stdout、判定器日志、两臂 gate 证据，以及 commit 级挖矿 provenance。
+      字段接口见 <code>SCHEMA.md</code>，缺失字段账见 <code>FIELD_COVERAGE.md</code>。</span>
   </a>
 
   <footer>
     静态站点，无构建、无依赖。<br>
-    数据源自 EmpiriaAI/EmpiriaAI.github.io。
+    阅读器源自 EmpiriaAI/EmpiriaAI.github.io；SWE 语料来自 minions_v148_pack_20260911。
   </footer>
 </main>
 </body>

@@ -1,15 +1,26 @@
 (function () {
   'use strict';
 
-  var trajectories = (window.EMPIRIA_RAW_TRAJECTORIES || []).concat(window.EMPIRIA_FEEDBACK_SNAPSHOTS || []);
+  var trajectories = (window.EMPIRIA_RAW_TRAJECTORIES || [])
+    .concat(window.EMPIRIA_SWE_TRAJECTORIES || [])
+    .concat(window.EMPIRIA_FEEDBACK_SNAPSHOTS || []);
   if (!trajectories.length) return;
 
   var selectedIndex = 0;
-  var activeCategory = 'feedback';
+  var activeCategory = (function () {
+    var wanted = new URLSearchParams(location.search).get('category');
+    return ['feedback', 'swe', 'terminal'].indexOf(wanted) >= 0 ? wanted : 'feedback';
+  })();
   var highQualityOnly = false;
+  var deduplicateSessions = false;
+  var timelineMode = 'linear';
+  var timelineFullscreen = false;
+  var sidebarVisible = true;
+  var pageScrollY = 0;
   var activeFilters = new Set(['user', 'thinking', 'assistant', 'tool_call', 'tool_result']);
   var elements = {
     topCategoryNav: document.getElementById('topCategoryNav'),
+    main: document.querySelector('.trajectory-main'),
     sidebar: document.getElementById('analyticsSidebar'),
     sidebarGroups: document.getElementById('sidebarGroups'),
     sidebarRunCount: document.getElementById('sidebarRunCount'),
@@ -31,11 +42,19 @@
     runSearch: document.getElementById('runSearch'),
     search: document.getElementById('trajectorySearch'),
     filters: document.getElementById('trajectoryFilters'),
+    timelineWorkspace: document.getElementById('timelineWorkspace'),
+    timelineToolbar: document.getElementById('timelineToolbar'),
     timeline: document.getElementById('rawTimeline'),
+    linearViewButton: document.getElementById('linearViewButton'),
+    dialogueViewButton: document.getElementById('dialogueViewButton'),
+    embeddedDialogue: document.getElementById('embeddedDialogue'),
+    dialogueFrame: document.getElementById('dialogueFrame'),
+    timelineFullscreen: document.getElementById('timelineFullscreen'),
     empty: document.getElementById('rawEmpty'),
     expand: document.getElementById('expandVisible'),
     collapse: document.getElementById('collapseAll'),
     highQualityOnly: document.getElementById('highQualityOnly'),
+    deduplicateSessions: document.getElementById('deduplicateSessions'),
     environmentPanel: document.getElementById('environmentPanel'),
     environmentGrid: document.getElementById('environmentGrid'),
     lifecycle: document.getElementById('environmentLifecycle'),
@@ -117,11 +136,79 @@
   }
 
   function categoryCount(category) {
-    return categoryItems(category).length;
+    return applySnapshotDedup(categoryItems(category)).length;
+  }
+
+  function applySnapshotDedup(items) {
+    if (!deduplicateSessions) return items;
+    var bestBySession = new Map();
+    items.forEach(function (trajectory) {
+      if (!trajectory.snapshotLabel || !trajectory.conversationId) return;
+      var current = bestBySession.get(trajectory.conversationId);
+      if (!current || trajectory.messageCount > current.messageCount ||
+          (trajectory.messageCount === current.messageCount && trajectory.eventCount > current.eventCount) ||
+          (trajectory.messageCount === current.messageCount && trajectory.eventCount === current.eventCount && trajectory.snapshotOrdinal > current.snapshotOrdinal)) {
+        bestBySession.set(trajectory.conversationId, trajectory);
+      }
+    });
+    return items.filter(function (trajectory) {
+      return !trajectory.snapshotLabel || bestBySession.get(trajectory.conversationId) === trajectory;
+    });
   }
 
   function selectedTrajectory() {
     return trajectories[selectedIndex];
+  }
+
+  function dialogueKey(trajectory) {
+    return (trajectory.shortId || trajectory.id) +
+      (trajectory.snapshotOrdinal ? '-s' + trajectory.snapshotOrdinal : '');
+  }
+
+  function dialogueUrl(trajectory) {
+    return 'trajectory-dialogue.html?embed=1&run=' + encodeURIComponent(dialogueKey(trajectory));
+  }
+
+  function syncDialogue(trajectory) {
+    var url = dialogueUrl(trajectory);
+    elements.dialogueFrame.dataset.src = url;
+    if (timelineMode === 'dialogue' && elements.dialogueFrame.getAttribute('src') !== url) {
+      elements.dialogueFrame.src = url;
+    }
+  }
+
+  function setTimelineMode(mode) {
+    timelineMode = mode === 'dialogue' ? 'dialogue' : 'linear';
+    var dialogue = timelineMode === 'dialogue';
+    elements.linearViewButton.setAttribute('aria-pressed', String(!dialogue));
+    elements.dialogueViewButton.setAttribute('aria-pressed', String(dialogue));
+    elements.timeline.hidden = dialogue;
+    elements.embeddedDialogue.hidden = !dialogue;
+    elements.timelineToolbar.hidden = dialogue;
+    if (dialogue) {
+      elements.empty.hidden = true;
+      syncDialogue(selectedTrajectory());
+      text('timelineStatus', 'Two-lane view');
+    } else {
+      renderTimeline();
+    }
+  }
+
+  function setSidebarVisible(visible) {
+    sidebarVisible = visible;
+    var mobile = window.innerWidth <= 820;
+    elements.main.classList.toggle('sidebar-collapsed', !visible && !mobile);
+    elements.sidebar.classList.toggle('open', visible && mobile);
+    elements.sidebarOpen.setAttribute('aria-expanded', String(visible));
+  }
+
+  function setTimelineFullscreen(active) {
+    timelineFullscreen = Boolean(active);
+    if (timelineFullscreen) pageScrollY = window.scrollY;
+    document.body.classList.toggle('timeline-fullscreen', timelineFullscreen);
+    elements.timelineFullscreen.setAttribute('aria-pressed', String(timelineFullscreen));
+    elements.timelineFullscreen.firstChild.nodeValue = timelineFullscreen ? 'Exit fullscreen ' : 'Fullscreen ';
+    if (!timelineFullscreen) window.scrollTo(0, pageScrollY);
   }
 
   function loadTrajectoryEvents(trajectory) {
@@ -182,8 +269,12 @@
     var allowFailed = outcomeChecks.find(function (input) { return input.dataset.runFilter === 'failed'; }).checked;
     elements.sidebarGroups.textContent = '';
     var visibleRuns = 0;
+    var snapshotItems = categoryItems('feedback').filter(function (trajectory) { return Boolean(trajectory.snapshotLabel); });
+    var snapshotSessions = new Set(snapshotItems.map(function (trajectory) { return trajectory.conversationId; })).size;
+    text('deduplicateHint', deduplicateSessions ? snapshotSessions + ' longest snapshots · ' + (snapshotItems.length - snapshotSessions) + ' hidden' : snapshotItems.length + ' snapshots → ' + snapshotSessions + ' longest');
 
     ['feedback', 'swe', 'terminal'].forEach(function (category) {
+      if (!categoryItems(category).length) return;
       var section = document.createElement('section');
       section.className = 'sidebar-group';
       var heading = document.createElement('button');
@@ -195,7 +286,7 @@
       heading.addEventListener('click', function () {
         activeCategory = category;
         highQualityOnly = false;
-        var first = categoryItems(category)[0];
+        var first = applySnapshotDedup(categoryItems(category))[0];
         if (first) selectedIndex = trajectories.indexOf(first);
         renderAll();
       });
@@ -203,7 +294,7 @@
 
       var list = document.createElement('div');
       list.className = 'sidebar-run-list';
-      var items = categoryItems(category).filter(function (trajectory) {
+      var items = applySnapshotDedup(categoryItems(category)).filter(function (trajectory) {
         var status = trajectoryStatus(trajectory);
         if (status.successful && !allowSuccess) return false;
         if (!status.successful && !allowFailed) return false;
@@ -260,12 +351,15 @@
     var status = trajectoryStatus(trajectory);
     text('runBreadcrumb', trajectorySourceLabel(trajectory) + ' / ' + trajectory.shortId);
     text('trajectoryName', trajectory.title);
-    text('runSubtitle', env.issue || env.taskName || trajectory.taskType || 'Agent trajectory');
+    text('runSubtitle', trajectory.trajectoryClass === 'swe'
+      ? [env.repository, env.task, env.provShape].filter(Boolean).join('  ·  ')
+      : (env.issue || env.taskName || trajectory.taskType || 'Agent trajectory'));
     var badge = document.getElementById('trajectoryResult');
     badge.textContent = status.label;
     badge.className = 'run-status ' + (status.successful ? 'success' : 'error');
     var meta = [trajectory.model, trajectory.agent || env.agent, trajectory.dataSource, trajectory.snapshotLabel, trajectory.id].filter(Boolean);
     document.getElementById('runMetaLine').textContent = meta.join(' · ');
+    syncDialogue(trajectory);
   }
 
   function renderMetrics(trajectory) {
@@ -327,17 +421,25 @@
     text('taskStatement', env.issue || trajectory.title);
     appendFacts(elements.taskFacts, trajectory.trajectoryClass === 'swe' ? [
       ['Task type', trajectory.taskType], ['Category', env.taskCategory || trajectory.category], ['Model', trajectory.model || env.model],
-      ['Service tier', env.serviceTier || trajectory.serviceTier || 'Not reported'], ['Created', '2019-03-24'],
-      ['Base commit', env.baseCommit], ['Patch target', 'django/template/engine.py'], ['Regression test', 'test_autoescape_off']
+      ['Service tier', env.serviceTier || trajectory.serviceTier || 'Not reported'],
+      ['Commit authored', env.provAuthorDate], ['Base commit', env.baseCommit],
+      ['Commit subject', env.commitSubject],
+      ['Patch target', (env.goldFiles || []).join(', ')],
+      ['Hidden tests', (env.hiddenTests || []).join(', ')],
+      ['Withheld from agent', (env.provWithheld || []).join(', ')]
     ] : [
       ['Category', trajectory.category], ['Task type', trajectory.taskType], ['Value tier', trajectory.valueTier],
       ['Model', trajectory.model], ['Data source', trajectory.dataSource], ['Messages', number(trajectory.messageCount)]
     ]);
 
     appendFacts(elements.verificationList, trajectory.trajectoryClass === 'swe' ? [
-      ['Reward', env.reward, 'success-text'], ['Resolved', env.resolved, 'success-text'], ['Patch exists', 'true', 'success-text'],
-      ['Patch applied', env.patchApplied, 'success-text'], ['FAIL_TO_PASS', env.failToPass, 'success-text'],
-      ['PASS_TO_PASS', env.passToPass, 'success-text'], ['Tests', env.tests, 'success-text'], ['Exception', 'None', 'success-text']
+      ['Reward', env.reward, env.resolved === 'true' ? 'success-text' : 'error-text'],
+      ['Resolved', env.resolved, env.resolved === 'true' ? 'success-text' : 'error-text'],
+      ['Verdict', env.verdict], ['Gold patch exists', env.patchExists, 'success-text'],
+      ['Agent produced steps', env.patchApplied],
+      ['Empty-patch arm', env.failToPass], ['Gold-patch arm', env.passToPass],
+      ['Verifier suite', env.tests], ['Verifier rc', env.verifierRc == null ? null : String(env.verifierRc)],
+      ['Graded by', env.gradedBy], ['Stopped because', env.stoppedBecause || 'None']
     ] : [
       ['Outcome', titleCase(trajectory.situation), trajectoryStatus(trajectory).successful ? 'success-text' : 'error-text'],
       ['Value tier', trajectory.valueTier], ['Error rate', trajectory.errorRate == null ? '—' : (trajectory.errorRate * 100).toFixed(1) + '%'],
@@ -360,7 +462,106 @@
     });
   }
 
+  var FEEDBACK_HEADINGS = ['Cleaning quality', 'Task classification', 'Value & routing',
+    'Quality analysis', 'Difficulty', 'Thinking cleanup', 'Quality segments', 'Dataset snapshot'];
+  var SWE_HEADINGS = ['Commit provenance', 'Task construction', 'Two-arm gate',
+    'Suite-flip evidence', 'Gold patch & hidden tests', 'Run outcome',
+    'Gate arms (raw pytest tails)', 'Pack & budgets'];
+
+  function setPipelineHeadings(headings, panelTitle) {
+    headings.forEach(function (label, index) { text('pipeH' + (index + 1), label); });
+    text('pipelinePanelTitle', panelTitle);
+  }
+
+  function list(value) { return value && value.length ? (Array.isArray(value) ? value.join(', ') : value) : null; }
+
+  function renderSweProvenance(trajectory) {
+    var env = trajectory.environment || {};
+    var ev = env.provEvidence || {};
+    var judge = env.provJudge || {};
+    var behavior = judge.behavior_summary || {};
+    elements.pipelinePanel.hidden = false;
+    setPipelineHeadings(SWE_HEADINGS, 'Provenance & gate evidence');
+    text('pipelineSourceLabel', 'Mining pipeline · ' + (env.provRoute || 'swebench'));
+    text('pipelineSummaryStatus',
+      (env.gateOracleRc === 0 && env.gateEmptyRc !== 0 ? 'Gate passed' : 'Gate incomplete')
+      + ' · ' + (env.provShape || '—'));
+
+    appendFacts(elements.pipelineCleanFacts, [
+      ['Repository', env.repository], ['Repo URL', env.provRepoUrl], ['Bucket', env.provBucket],
+      ['Commit', env.baseCommit], ['Parent', env.provParent], ['Subject', env.commitSubject],
+      ['Author', env.provAuthor], ['Authored', env.provAuthorDate],
+      ['Merge commit', env.provIsMerge == null ? null : yesNo(env.provIsMerge)],
+      ['Issue refs', list(env.provIssueRefs) || 'None'], ['Issue tracker', env.provIssueTracker]
+    ]);
+    appendFacts(elements.pipelineClassificationFacts, [
+      ['Instance ID', env.provInstanceId], ['Shape', env.provShape], ['Route', env.provRoute],
+      ['Statement origin', env.provStatementOrigin], ['Test origin', env.provTestOrigin],
+      ['Withheld from agent', list(env.provWithheld)], ['Harbor ref', env.provHarborRef],
+      ['Image digest', env.provImageDigest], ['Gold patch digest', env.provGoldDigest],
+      ['Test patch digest', env.provTestDigest], ['Base tarball', env.baseTarball]
+    ]);
+    appendReasons(elements.pipelineReasonList, [
+      ['User scenario', behavior.user_scenario], ['Wrong behavior', behavior.wrong_behavior],
+      ['Expected behavior', behavior.expected_behavior],
+      ['Judge verdict', judge.verdict || judge.decision], ['Judge reason', judge.reason || judge.rationale]
+    ]);
+    appendFacts(elements.pipelineRoutingFacts, [
+      ['Empty-patch rc', env.gateEmptyRc == null ? null : String(env.gateEmptyRc)],
+      ['Empty-patch reward', env.gateEmptyReward == null ? null : String(env.gateEmptyReward)],
+      ['Gold-patch rc', env.gateOracleRc == null ? null : String(env.gateOracleRc)],
+      ['Gold-patch reward', env.gateOracleReward == null ? null : String(env.gateOracleReward)],
+      ['Empty arm summary', env.failToPass], ['Gold arm summary', env.passToPass]
+    ]);
+    appendFacts(elements.pipelineQualityFacts, [
+      ['base_rc', ev.base_rc], ['broken_rc', ev.broken_rc], ['fixed_rc', ev.fixed_rc],
+      ['gold_patch_rc', ev.gold_patch_rc], ['test_patch_rc', ev.test_patch_rc], ['tree_rc', ev.tree_rc],
+      ['Evidence source', ev.source]
+    ]);
+    appendFacts(elements.pipelineDifficultyFacts, [
+      ['Gold files', list(env.goldFiles)], ['Lines added', number(env.goldAdd)], ['Lines removed', number(env.goldDel)],
+      ['Patch lines (task.toml)', number(env.patchLines)], ['Hidden tests', list(env.hiddenTests)],
+      ['Mined gold files', list(env.provGoldFiles)], ['Mined test files', list(env.provTestFiles)],
+      ['Difficulty label', env.difficulty], ['Domain', env.domain]
+    ]);
+    appendFacts(elements.pipelineThinkingFacts, [
+      ['Verdict', env.verdict], ['Agent steps', number(env.steps)], ['Stopped because', env.stoppedBecause],
+      ['Verifier rc', env.verifierRc == null ? null : String(env.verifierRc)],
+      ['Suite rc', env.suiteRc == null ? null : String(env.suiteRc)],
+      ['Graded by', env.gradedBy], ['codex exit rc', env.codexRc == null ? null : String(env.codexRc)],
+      ['Agent wall clock', env.agentDuration == null ? null : duration(env.agentDuration)],
+      ['Verifier wall clock', env.verifierDuration == null ? null : duration(env.verifierDuration)],
+      ['Commands with output', env.outputCoverage]
+    ]);
+    appendFacts(elements.pipelineSegmentFacts, [
+      ['Empty arm', 'rc ' + env.gateEmptyRc + ' · reward ' + env.gateEmptyReward],
+      ['Gold arm', 'rc ' + env.gateOracleRc + ' · reward ' + env.gateOracleReward]
+    ]);
+    elements.pipelineSegments.textContent = '';
+    [['Empty patch (no fix applied)', env.gateEmptyTail], ['Gold patch applied', env.gateOracleTail]]
+      .forEach(function (pair) {
+        if (!pair[1]) return;
+        var item = document.createElement('article');
+        var head = document.createElement('header');
+        var title = document.createElement('strong'); title.textContent = pair[0];
+        head.appendChild(title);
+        var pre = document.createElement('pre'); var code = document.createElement('code');
+        code.textContent = pair[1]; pre.appendChild(code);
+        item.appendChild(head); item.appendChild(pre);
+        elements.pipelineSegments.appendChild(item);
+      });
+    appendFacts(elements.pipelineDatasetFacts, [
+      ['Benchmark', env.benchmark], ['Variant', env.version], ['Keywords', list(env.keywords)],
+      ['Agent timeout', env.agentTimeout == null ? null : duration(env.agentTimeout)],
+      ['Verifier timeout', env.verifierTimeout == null ? null : duration(env.verifierTimeout)],
+      ['Resources', [env.cpu, env.memory, env.storage].filter(Boolean).join(' · ')],
+      ['Internet', env.internet], ['Verifier command', env.verifier],
+      ['Language', env.language], ['Source file', env.sourceFile]
+    ]);
+  }
+
   function renderPipelineDetails(trajectory) {
+    if (trajectory.trajectoryClass === 'swe') { renderSweProvenance(trajectory); return; }
     var source = window.EMPIRIA_FEEDBACK_PIPELINE || {};
     var detail = trajectory.pipelineDetail || source.trajectories && source.trajectories[trajectory.id];
     if (trajectory.trajectoryClass !== 'feedback' || !detail) {
@@ -379,6 +580,7 @@
     var dataset = detail.dataset || source.dataset || {};
 
     elements.pipelinePanel.hidden = false;
+    setPipelineHeadings(FEEDBACK_HEADINGS, 'Pipeline details');
     text('pipelineSourceLabel', 'Feedback metadata');
     text('pipelineSummaryStatus', (clean.passed ? 'Clean pass' : 'Rejected') + ' · ' + titleCase(classification.situation));
 
@@ -589,6 +791,12 @@
 
   function renderTimeline() {
     var trajectory = selectedTrajectory();
+    if (timelineMode === 'dialogue') {
+      syncDialogue(trajectory);
+      elements.empty.hidden = true;
+      text('timelineStatus', 'Two-lane view');
+      return;
+    }
     if (!Array.isArray(trajectory.events)) return;
     var qualityMap = highQualityNodeMap(trajectory);
     var query = elements.search.value.trim().toLowerCase();
@@ -624,10 +832,23 @@
 
   elements.topCategoryNav.addEventListener('click', function (event) {
     var button = event.target.closest('[data-category]'); if (!button) return;
-    activeCategory = button.dataset.category; highQualityOnly = false; var first = categoryItems(activeCategory)[0]; if (first) selectedIndex = trajectories.indexOf(first); renderAll();
+    activeCategory = button.dataset.category; highQualityOnly = false; var first = applySnapshotDedup(categoryItems(activeCategory))[0]; if (first) selectedIndex = trajectories.indexOf(first); renderAll();
   });
   elements.runSearch.addEventListener('input', renderSidebar);
   Array.prototype.forEach.call(document.querySelectorAll('[data-run-filter]'), function (input) { input.addEventListener('change', renderSidebar); });
+  elements.deduplicateSessions.addEventListener('change', function () {
+    deduplicateSessions = elements.deduplicateSessions.checked;
+    if (deduplicateSessions && selectedTrajectory().snapshotLabel) {
+      var visible = applySnapshotDedup(categoryItems('feedback'));
+      if (visible.indexOf(selectedTrajectory()) === -1) {
+        var replacement = visible.find(function (trajectory) {
+          return trajectory.conversationId === selectedTrajectory().conversationId;
+        });
+        if (replacement) selectedIndex = trajectories.indexOf(replacement);
+      }
+    }
+    renderAll();
+  });
   elements.search.addEventListener('input', renderTimeline);
   elements.filters.addEventListener('click', function (event) {
     var button = event.target.closest('[data-filter]'); if (!button) return;
@@ -639,10 +860,32 @@
     elements.highQualityOnly.setAttribute('aria-pressed', String(highQualityOnly));
     renderTimeline();
   });
+  elements.linearViewButton.addEventListener('click', function () { setTimelineMode('linear'); });
+  elements.dialogueViewButton.addEventListener('click', function () { setTimelineMode('dialogue'); });
+  elements.timelineFullscreen.addEventListener('click', function () { setTimelineFullscreen(!timelineFullscreen); });
   elements.expand.addEventListener('click', function () { Array.prototype.forEach.call(elements.timeline.querySelectorAll('details'), function (node) { node.open = true; }); });
   elements.collapse.addEventListener('click', function () { Array.prototype.forEach.call(elements.timeline.querySelectorAll('details'), function (node) { node.open = false; }); });
-  elements.sidebarOpen.addEventListener('click', function () { elements.sidebar.classList.add('open'); });
-  elements.sidebarClose.addEventListener('click', function () { elements.sidebar.classList.remove('open'); });
+  elements.sidebarOpen.addEventListener('click', function () { setSidebarVisible(true); });
+  elements.sidebarClose.addEventListener('click', function () { setSidebarVisible(false); });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && timelineFullscreen) setTimelineFullscreen(false);
+  });
+  window.addEventListener('message', function (event) {
+    if (event.data && event.data.type === 'empiria-exit-timeline-fullscreen' && timelineFullscreen) {
+      setTimelineFullscreen(false);
+    }
+  });
+  window.addEventListener('resize', function () { setSidebarVisible(sidebarVisible); }, { passive: true });
+
+  (function pickInitialRun() {
+    var pool = categoryItems(activeCategory);
+    if (!pool.length) return;
+    var solved = pool.filter(function (t) { return t.situation === 'successful'; });
+    var best = (solved.length ? solved : pool).reduce(function (a, b) {
+      return (b.events || []).length > (a.events || []).length ? b : a;
+    });
+    selectedIndex = trajectories.indexOf(best);
+  })();
 
   renderAll();
 })();

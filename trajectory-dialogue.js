@@ -76,7 +76,7 @@
     notes:   'empiria.dlg.notes'
   };
 
-  var trajectories = (window.EMPIRIA_RAW_TRAJECTORIES || [])
+  var trajectories = (window.EMPIRIA_RAW_TRAJECTORIES || []).concat(window.EMPIRIA_SWE_TRAJECTORIES || [])
     .concat(window.EMPIRIA_FEEDBACK_SNAPSHOTS || []);
 
   var el = {};

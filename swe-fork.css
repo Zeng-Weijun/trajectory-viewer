@@ -1,0 +1,10 @@
+/* swe-task-forge additions on top of the vendored Empiria stylesheets.
+   `missing` is not a failure: the command ran, the harness just never stored
+   its output. It must not read like an error in either viewer. */
+.raw-event.status-missing .raw-event-marker { background: transparent; box-shadow: inset 0 0 0 1px currentColor; opacity: .45; }
+.raw-event.status-missing .raw-event-body pre code,
+.raw-event.status-missing .raw-event-preview { opacity: .5; font-style: italic; }
+.raw-event.status-missing .raw-event-meta { opacity: .55; letter-spacing: .04em; }
+
+.dlg-status.st-missing { opacity: .55; border-style: dashed; }
+.dlg-card .dlg-status.st-missing ~ * { opacity: .75; }
